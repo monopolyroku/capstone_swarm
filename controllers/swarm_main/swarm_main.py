@@ -257,6 +257,116 @@ def adjust_wall_following_for_obstacles(cmd_vel_x, cmd_vel_y, current_pos, curre
     
     return adjusted_cmd_vel_x, adjusted_cmd_vel_y
 
+# Add a function to find a safe path around obstacles
+def find_safe_path(current_pos, target_pos, current_time):
+    """Find a safe path from current position to target position, avoiding obstacles"""
+    if not obstacle_positions:
+        return target_pos  # No obstacles, go directly to target
+    
+    # Check if direct path to target is safe
+    if not is_near_obstacle([
+        (current_pos[0] + target_pos[0]) / 2,  # Midpoint between current and target
+        (current_pos[1] + target_pos[1]) / 2,
+        current_pos[2]
+    ], current_time, obstacle_radius * 1.5):
+        return target_pos  # Direct path is safe
+    
+    # Find the nearest obstacle to the path
+    nearest_obstacle = None
+    min_distance = float('inf')
+    
+    # Check distance from each obstacle to the line segment between current and target
+    for obs in obstacle_positions:
+        # Calculate distance from obstacle to line segment
+        # Using the formula for distance from point to line segment
+        line_dir = [target_pos[j] - current_pos[j] for j in range(2)]
+        line_length = (line_dir[0]**2 + line_dir[1]**2)**0.5
+        
+        if line_length < 0.001:  # If current and target are very close
+            distance = sum((current_pos[j] - obs[j])**2 for j in range(2))**0.5
+        else:
+            # Normalize line direction
+            line_dir = [d / line_length for d in line_dir]
+            
+            # Vector from current position to obstacle
+            to_obs = [obs[j] - current_pos[j] for j in range(2)]
+            
+            # Project to_obs onto line_dir
+            projection = sum(to_obs[j] * line_dir[j] for j in range(2))
+            
+            # Clamp projection to line segment
+            projection = max(0, min(line_length, projection))
+            
+            # Find closest point on line segment
+            closest_point = [
+                current_pos[0] + line_dir[0] * projection,
+                current_pos[1] + line_dir[1] * projection
+            ]
+            
+            # Calculate distance from obstacle to closest point
+            distance = sum((closest_point[j] - obs[j])**2 for j in range(2))**0.5
+        
+        if distance < min_distance:
+            min_distance = distance
+            nearest_obstacle = obs
+    
+    if nearest_obstacle is None or min_distance > obstacle_radius * 1.5:
+        return target_pos  # No obstacles close enough to the path
+    
+    # Calculate waypoint to go around the obstacle
+    # Create a vector perpendicular to the line from current to target
+    line_dir = [target_pos[j] - current_pos[j] for j in range(2)]
+    line_length = (line_dir[0]**2 + line_dir[1]**2)**0.5
+    
+    if line_length < 0.001:  # If current and target are very close
+        # Move in a consistent direction for all drones
+        perp_vector = [1.0, 0.0]  # Right
+    else:
+        # Normalize line direction
+        line_dir = [d / line_length for d in line_dir]
+        
+        # Create perpendicular vector (rotate 90 degrees clockwise)
+        # All drones will take the same side of obstacles
+        perp_vector = [-line_dir[1], line_dir[0]]
+    
+    # Calculate waypoint by moving perpendicular to the path
+    # The distance is based on the obstacle radius plus a safety margin
+    safe_distance = obstacle_radius * 2.0
+    
+    # Vector from obstacle to the line
+    obs_to_line = [
+        nearest_obstacle[0] - current_pos[0],
+        nearest_obstacle[1] - current_pos[1]
+    ]
+    
+    # Determine which side of the line the obstacle is on
+    # by taking the dot product with the perpendicular vector
+    side = sum(obs_to_line[j] * perp_vector[j] for j in range(2))
+    
+    # If the obstacle is on the same side we're planning to go around,
+    # flip the perpendicular vector
+    if side > 0:
+        perp_vector = [-perp_vector[0], -perp_vector[1]]
+    
+    # Calculate waypoint
+    waypoint = [
+        nearest_obstacle[0] + perp_vector[0] * safe_distance,
+        nearest_obstacle[1] + perp_vector[1] * safe_distance,
+        current_pos[2]  # Keep the same height
+    ]
+    
+    # Ensure the waypoint itself is not too close to any obstacle
+    if is_near_obstacle(waypoint, current_time, obstacle_radius * 1.5):
+        # If waypoint is too close to an obstacle, move it further out
+        waypoint = [
+            nearest_obstacle[0] + perp_vector[0] * safe_distance * 2.0,
+            nearest_obstacle[1] + perp_vector[1] * safe_distance * 2.0,
+            current_pos[2]
+        ]
+    
+    print(f"Drone {drone_id}: Created safe waypoint at {waypoint} to avoid obstacle at {nearest_obstacle}")
+    return waypoint
+
 # Add a function to visualize obstacles for debugging
 def print_obstacle_map():
     """Print a simple 2D map of obstacles for debugging"""
@@ -429,7 +539,7 @@ if __name__ == '__main__':
 
     # Initialize PID controller for each drone
     pid_controller = pid_velocity_fixed_height_controller()
-
+    
     # Initialize autonomous mode
     autonomous_mode = False
     autonomous_start_time = 0  # Track when autonomous mode was enabled
@@ -501,8 +611,8 @@ if __name__ == '__main__':
 
         # Choose wall following direction based on drone ID
         if drone_id == 3:
-            direction = WallFollowing.WallFollowingDirection.LEFT
-            range_side_value = range_right_value  # Use left sensor for right wall following
+            direction = WallFollowing.WallFollowingDirection.RIGHT
+            range_side_value = range_left_value  # Use left sensor for right wall following
         else:
             direction = WallFollowing.WallFollowingDirection.LEFT
             range_side_value = range_right_value  # Use right sensor for left wall following
@@ -513,7 +623,24 @@ if __name__ == '__main__':
             
         # Check for obstacles and adjust wall following if needed
         if obstacle_positions:
-            cmd_vel_x, cmd_vel_y = adjust_wall_following_for_obstacles(cmd_vel_x, cmd_vel_y, current_pos, current_time)
+            # First try to find a safe path
+            safe_target = find_safe_path(current_pos, 
+                                        [current_pos[0] + cmd_vel_x, current_pos[1] + cmd_vel_y, current_pos[2]], 
+                                        current_time)
+            
+            # Calculate new velocity commands toward the safe target
+            safe_dir_x = safe_target[0] - current_pos[0]
+            safe_dir_y = safe_target[1] - current_pos[1]
+            
+            # Normalize and scale to maintain similar speed
+            safe_dir_magnitude = (safe_dir_x**2 + safe_dir_y**2)**0.5
+            if safe_dir_magnitude > 0.001:
+                original_magnitude = (cmd_vel_x**2 + cmd_vel_y**2)**0.5
+                safe_dir_x = safe_dir_x / safe_dir_magnitude * original_magnitude
+                safe_dir_y = safe_dir_y / safe_dir_magnitude * original_magnitude
+            
+            # Apply the standard obstacle avoidance on top of the safe path
+            cmd_vel_x, cmd_vel_y = adjust_wall_following_for_obstacles(safe_dir_x, safe_dir_y, current_pos, current_time)
             
             # Periodically print the obstacle map (every 5 seconds)
             if int(current_time) % 5 == 0 and int(current_time) != int(past_time):
