@@ -388,7 +388,7 @@ def print_obstacle_map():
         # For x: -10 maps to index 0, +10 maps to index (grid_size-1)
         # For y: -10 maps to index (grid_size-1), +10 maps to index 0 (inverted)
         x_idx = int((obs[0] + map_size/2) / cell_size)
-        y_idx = int((map_size/2 - obs[1]) / cell_size)  # Invert y-axis
+        y_idx = int((map_size/2 - obs[1]) / cell_size)  
         
         # Ensure indices are within bounds
         x_idx = max(0, min(grid_size-1, x_idx))
@@ -495,137 +495,6 @@ def print_wall_map():
             print("   |" + "  ".join(wall_map[y]) + "|")
     
     print("   +" + "-" * (WALL_GRID_SIZE * 2) + "+")  # Double the width of the border
-
-# wall measuring params
-# wall_segments = []  # List to store wall segments with start and end points
-# current_wall_start = None  # Starting point of current wall segment
-# last_wall_point = None  # Last detected wall point
-# MIN_WALL_LENGTH = 0.5  # Minimum length to consider as a wall segment
-# wall_measurements = {
-#     'lengths': [],  # Store different wall lengths
-#     'total_distance': 0  # Total distance traveled along walls
-# }
-
-# def update_wall_measurements(current_pos, range_front, range_right, range_left, yaw, v_x, v_y, dt):
-#     """Update wall measurements based on drone movement and sensor readings"""
-#     global current_wall_start, last_wall_point, wall_segments, wall_measurements
-    
-#     # Calculate current velocity magnitude
-#     velocity_magnitude = (v_x**2 + v_y**2)**0.5
-    
-#     # Check if we're detecting a wall (using any of the range sensors)
-#     detecting_wall = (range_front < 2.0 or range_right < 2.0 or range_left < 2.0)
-    
-#     # Calculate the current wall point if we're detecting a wall
-#     if detecting_wall:
-#         # Use the closest sensor reading to determine wall position
-#         min_range = min(
-#             range_front if range_front < 2.0 else float('inf'),
-#             range_right if range_right < 2.0 else float('inf'),
-#             range_left if range_left < 2.0 else float('inf')
-#         )
-        
-#         # Calculate wall point based on drone position and sensor reading
-#         if min_range == range_front:
-#             wall_point = [
-#                 current_pos[0] + range_front * cos(yaw),
-#                 current_pos[1] + range_front * sin(yaw)
-#             ]
-#         elif min_range == range_right:
-#             wall_point = [
-#                 current_pos[0] + range_right * cos(yaw + pi/2),
-#                 current_pos[1] + range_right * sin(yaw + pi/2)
-#             ]
-#         else:  # Left sensor
-#             wall_point = [
-#                 current_pos[0] + range_left * cos(yaw - pi/2),
-#                 current_pos[1] + range_left * sin(yaw - pi/2)
-#             ]
-        
-#         # Initialize wall segment if we don't have one
-#         if current_wall_start is None:
-#             current_wall_start = wall_point
-#             last_wall_point = wall_point
-#         else:
-#             # Calculate distance from last point
-#             dist_from_last = ((wall_point[0] - last_wall_point[0])**2 + 
-#                             (wall_point[1] - last_wall_point[1])**2)**0.5
-            
-#             # Update total distance
-#             wall_measurements['total_distance'] += dist_from_last
-            
-#             # Check if we've moved significantly from the start of the wall
-#             dist_from_start = ((wall_point[0] - current_wall_start[0])**2 + 
-#                              (wall_point[1] - current_wall_start[1])**2)**0.5
-            
-#             # If we've moved significantly and the direction has changed, end the wall segment
-#             if dist_from_start > MIN_WALL_LENGTH:
-#                 # Calculate angle change
-#                 start_angle = atan2(last_wall_point[1] - current_wall_start[1],
-#                                   last_wall_point[0] - current_wall_start[0])
-#                 current_angle = atan2(wall_point[1] - last_wall_point[1],
-#                                     wall_point[0] - last_wall_point[0])
-#                 angle_diff = abs(normalize_angle(current_angle - start_angle))
-                
-#                 # If angle change is significant (e.g., > 45 degrees), end segment
-#                 if angle_diff > pi/4:
-#                     wall_segments.append({
-#                         'start': current_wall_start,
-#                         'end': last_wall_point,
-#                         'length': dist_from_start
-#                     })
-#                     wall_measurements['lengths'].append(dist_from_start)
-#                     current_wall_start = wall_point
-            
-#             last_wall_point = wall_point
-#     else:
-#         # If we've lost wall detection and had a wall segment, save it
-#         if current_wall_start is not None and last_wall_point is not None:
-#             dist = ((last_wall_point[0] - current_wall_start[0])**2 + 
-#                    (last_wall_point[1] - current_wall_start[1])**2)**0.5
-#             if dist > MIN_WALL_LENGTH:
-#                 wall_segments.append({
-#                     'start': current_wall_start,
-#                     'end': last_wall_point,
-#                     'length': dist
-#                 })
-#                 wall_measurements['lengths'].append(dist)
-#             current_wall_start = None
-#             last_wall_point = None
-
-# def normalize_angle(angle):
-#     """Normalize angle to [-pi, pi]"""
-#     while angle > pi:
-#         angle -= 2 * pi
-#     while angle < -pi:
-#         angle += 2 * pi
-#     return angle
-
-# def print_wall_measurements():
-#     """Print the current wall measurements"""
-#     if not wall_measurements['lengths']:
-#         print("\nNo wall measurements yet.")
-#         return
-    
-#     print("\nWall Measurements:")
-#     print(f"Total distance along walls: {wall_measurements['total_distance']:.2f} meters")
-#     print(f"Number of wall segments: {len(wall_segments)}")
-    
-#     # Print individual segment lengths
-#     print("\nWall segment lengths:")
-#     for i, segment in enumerate(wall_segments):
-#         print(f"Segment {i+1}: {segment['length']:.2f} meters")
-    
-#     # Calculate and print statistics
-#     lengths = wall_measurements['lengths']
-#     avg_length = sum(lengths) / len(lengths)
-#     max_length = max(lengths)
-#     min_length = min(lengths)
-    
-#     print(f"\nStatistics:")
-#     print(f"Average wall length: {avg_length:.2f} meters")
-#     print(f"Longest wall: {max_length:.2f} meters")
-#     print(f"Shortest wall: {min_length:.2f} meters")
 
 if __name__ == '__main__':
     # Initialize robot, motors
